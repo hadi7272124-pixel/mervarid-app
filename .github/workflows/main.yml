@@ -33,21 +33,19 @@ jobs:
           fi
 
           echo "Using project: $ZIP_FILE"
-
           unzip -q "$ZIP_FILE" -d build_project
 
           PUBSPEC=$(find build_project -name pubspec.yaml -type f | head -n 1)
 
           if [ -z "$PUBSPEC" ]; then
-            echo "ERROR: pubspec.yaml not found in ZIP"
+            echo "ERROR: pubspec.yaml not found"
             exit 1
           fi
 
           PROJECT_DIR=$(dirname "$PUBSPEC")
 
-          echo "Flutter project: $PROJECT_DIR"
-
           echo "PROJECT_DIR=$PWD/$PROJECT_DIR" >> "$GITHUB_ENV"
+          echo "Flutter project: $PWD/$PROJECT_DIR"
 
       - name: Setup Java
         uses: actions/setup-java@v4
@@ -61,29 +59,48 @@ jobs:
           channel: stable
           cache: true
 
-      - name: Install Android SDK 36
+      - name: Setup Android SDK
+        uses: android-actions/setup-android@v3
+
+      - name: Install Android 36
         shell: bash
         run: |
-          yes | sdkmanager --licenses > /dev/null || true
-          sdkmanager "platforms;android-36"
-          sdkmanager "build-tools;35.0.0"
+          sdkmanager "platforms;android-36" "build-tools;35.0.0"
 
       - name: Recreate Android project
         working-directory: ${{ env.PROJECT_DIR }}
         run: |
           flutter create --platforms=android --no-pub .
 
-      - name: Set Android compile SDK
+      - name: Configure Android SDK
         working-directory: ${{ env.PROJECT_DIR }}
         shell: bash
         run: |
-          sed -i 's/compileSdk = 31/compileSdk = 36/g' android/app/build.gradle
-          sed -i 's/compileSdkVersion 31/compileSdkVersion 36/g' android/app/build.gradle
+          python3 - <<'PY'
+          from pathlib import Path
+          import re
 
-          if grep -q "compileSdk" android/app/build.gradle; then
-            echo "compileSdk configuration:"
-            grep -n "compileSdk" android/app/build.gradle
-          fi
+          p = Path("android/app/build.gradle")
+          s = p.read_text(encoding="utf-8")
+
+          s = re.sub(
+              r'compileSdk\s*=\s*[^\n]+',
+              'compileSdk = 36',
+              s
+          )
+
+          s = re.sub(
+              r'compileSdkVersion\s+[^\n]+',
+              'compileSdkVersion 36',
+              s
+          )
+
+          p.write_text(s, encoding="utf-8")
+
+          print("Android compile SDK configured to 36.")
+          PY
+
+          grep -n "compileSdk" android/app/build.gradle || true
 
       - name: Fix Dart syntax
         working-directory: ${{ env.PROJECT_DIR }}
@@ -95,8 +112,7 @@ jobs:
           p = Path("lib/main.dart")
 
           if not p.exists():
-              print("main.dart not found")
-              raise SystemExit(1)
+              raise SystemExit("ERROR: lib/main.dart not found")
 
           s = p.read_text(encoding="utf-8")
 
