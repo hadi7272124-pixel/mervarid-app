@@ -60,7 +60,9 @@ jobs:
         with:
           channel: stable
           cache: true
-
+      - name: Recreate Android project
+        working-directory: ${{ env.PROJECT_DIR }}
+        run: flutter create --platforms=android --no-pub .
       - name: Get dependencies
         working-directory: ${{ env.PROJECT_DIR }}
         run: flutter pub get
