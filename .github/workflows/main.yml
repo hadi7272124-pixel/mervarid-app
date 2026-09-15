@@ -23,7 +23,7 @@ jobs:
           set -e
 
           rm -rf build_project
-          mkdir build_project
+          mkdir -p build_project
 
           ZIP_FILE=$(find . -maxdepth 1 -type f -iname "*.zip" | head -n 1)
 
@@ -32,22 +32,17 @@ jobs:
             exit 1
           fi
 
-          echo "Using: $ZIP_FILE"
           unzip -q "$ZIP_FILE" -d build_project
 
           PUBSPEC=$(find build_project -name pubspec.yaml -type f | head -n 1)
 
           if [ -z "$PUBSPEC" ]; then
-            echo "ERROR: pubspec.yaml not found in ZIP"
-            find build_project -maxdepth 3 -type f | head -100
+            echo "ERROR: pubspec.yaml not found"
             exit 1
           fi
 
           PROJECT_DIR=$(dirname "$PUBSPEC")
-          echo "Flutter project: $PROJECT_DIR"
-
-          cd "$PROJECT_DIR"
-          echo "PROJECT_DIR=$PWD" >> "$GITHUB_ENV"
+          echo "PROJECT_DIR=$PWD/$PROJECT_DIR" >> "$GITHUB_ENV"
 
       - name: Setup Java
         uses: actions/setup-java@v4
@@ -60,9 +55,34 @@ jobs:
         with:
           channel: stable
           cache: true
+
       - name: Recreate Android project
         working-directory: ${{ env.PROJECT_DIR }}
-        run: flutter create --platforms=android --no-pub .
+        run: |
+          flutter create --platforms=android --no-pub .
+
+      - name: Fix Dart syntax
+        working-directory: ${{ env.PROJECT_DIR }}
+        shell: bash
+        run: |
+          python3 - <<'PY'
+          from pathlib import Path
+
+          p = Path("lib/main.dart")
+          s = p.read_text(encoding="utf-8")
+
+          old = "PdfPage(startPage:p['page'] as int)));}))"
+          new = "PdfPage(startPage:p['page'] as int))));}))"
+
+          if old in s:
+              s = s.replace(old, new, 1)
+              p.write_text(s, encoding="utf-8")
+              print("Dart syntax fixed.")
+          else:
+              print("Target syntax already fixed or not found.")
+
+          PY
+
       - name: Get dependencies
         working-directory: ${{ env.PROJECT_DIR }}
         run: flutter pub get
