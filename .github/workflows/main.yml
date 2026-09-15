@@ -32,16 +32,21 @@ jobs:
             exit 1
           fi
 
+          echo "Using project: $ZIP_FILE"
+
           unzip -q "$ZIP_FILE" -d build_project
 
           PUBSPEC=$(find build_project -name pubspec.yaml -type f | head -n 1)
 
           if [ -z "$PUBSPEC" ]; then
-            echo "ERROR: pubspec.yaml not found"
+            echo "ERROR: pubspec.yaml not found in ZIP"
             exit 1
           fi
 
           PROJECT_DIR=$(dirname "$PUBSPEC")
+
+          echo "Flutter project: $PROJECT_DIR"
+
           echo "PROJECT_DIR=$PWD/$PROJECT_DIR" >> "$GITHUB_ENV"
 
       - name: Setup Java
@@ -56,10 +61,29 @@ jobs:
           channel: stable
           cache: true
 
+      - name: Install Android SDK 36
+        shell: bash
+        run: |
+          yes | sdkmanager --licenses > /dev/null || true
+          sdkmanager "platforms;android-36"
+          sdkmanager "build-tools;35.0.0"
+
       - name: Recreate Android project
         working-directory: ${{ env.PROJECT_DIR }}
         run: |
           flutter create --platforms=android --no-pub .
+
+      - name: Set Android compile SDK
+        working-directory: ${{ env.PROJECT_DIR }}
+        shell: bash
+        run: |
+          sed -i 's/compileSdk = 31/compileSdk = 36/g' android/app/build.gradle
+          sed -i 's/compileSdkVersion 31/compileSdkVersion 36/g' android/app/build.gradle
+
+          if grep -q "compileSdk" android/app/build.gradle; then
+            echo "compileSdk configuration:"
+            grep -n "compileSdk" android/app/build.gradle
+          fi
 
       - name: Fix Dart syntax
         working-directory: ${{ env.PROJECT_DIR }}
@@ -69,6 +93,11 @@ jobs:
           from pathlib import Path
 
           p = Path("lib/main.dart")
+
+          if not p.exists():
+              print("main.dart not found")
+              raise SystemExit(1)
+
           s = p.read_text(encoding="utf-8")
 
           old = "PdfPage(startPage:p['page'] as int)));}))"
@@ -79,17 +108,20 @@ jobs:
               p.write_text(s, encoding="utf-8")
               print("Dart syntax fixed.")
           else:
-              print("Target syntax already fixed or not found.")
+              print("Dart syntax already fixed or target not found.")
 
           PY
 
       - name: Get dependencies
         working-directory: ${{ env.PROJECT_DIR }}
-        run: flutter pub get
+        run: |
+          flutter clean
+          flutter pub get
 
       - name: Build APK
         working-directory: ${{ env.PROJECT_DIR }}
-        run: flutter build apk --release
+        run: |
+          flutter build apk --release
 
       - name: Upload APK
         uses: actions/upload-artifact@v4
