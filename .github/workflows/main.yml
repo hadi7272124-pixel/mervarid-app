@@ -60,19 +60,34 @@ jobs:
           cache: true
 
       - name: Setup Android SDK
-        uses: android-actions/setup-android@v3
-
-      - name: Install Android 36
         shell: bash
         run: |
-          sdkmanager "platforms;android-36" "build-tools;35.0.0"
+          set -e
+
+          export ANDROID_HOME=/usr/local/lib/android/sdk
+          export ANDROID_SDK_ROOT=/usr/local/lib/android/sdk
+
+          SDKMANAGER="$ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager"
+
+          if [ ! -f "$SDKMANAGER" ]; then
+            echo "ERROR: sdkmanager not found"
+            find "$ANDROID_HOME" -name sdkmanager -type f 2>/dev/null || true
+            exit 1
+          fi
+
+          echo "Using sdkmanager: $SDKMANAGER"
+
+          yes | "$SDKMANAGER" --licenses >/dev/null || true
+
+          "$SDKMANAGER" "platforms;android-36"
+          "$SDKMANAGER" "build-tools;35.0.0"
 
       - name: Recreate Android project
         working-directory: ${{ env.PROJECT_DIR }}
         run: |
           flutter create --platforms=android --no-pub .
 
-      - name: Configure Android SDK
+      - name: Configure Android
         working-directory: ${{ env.PROJECT_DIR }}
         shell: bash
         run: |
@@ -81,6 +96,10 @@ jobs:
           import re
 
           p = Path("android/app/build.gradle")
+
+          if not p.exists():
+              raise SystemExit("ERROR: android/app/build.gradle not found")
+
           s = p.read_text(encoding="utf-8")
 
           s = re.sub(
@@ -97,7 +116,7 @@ jobs:
 
           p.write_text(s, encoding="utf-8")
 
-          print("Android compile SDK configured to 36.")
+          print("Android compile SDK set to 36.")
           PY
 
           grep -n "compileSdk" android/app/build.gradle || true
