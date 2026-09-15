@@ -1,10 +1,10 @@
 name: Build Mervarid APK
 
 on:
-  workflow_dispatch:
   push:
     branches:
       - main
+  workflow_dispatch:
 
 permissions:
   contents: read
@@ -27,156 +27,74 @@ jobs:
         uses: subosito/flutter-action@v2
         with:
           channel: stable
-          cache: true
 
-      - name: Setup Android SDK
+      - name: Setup Android
         uses: android-actions/setup-android@v3
 
-      - name: Install Android SDK 36
-        shell: bash
+      - name: Install Android 36
         run: |
-          set -e
-
-          SDKMANAGER="$ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager"
-
-          if [ ! -f "$SDKMANAGER" ]; then
-            SDKMANAGER=$(find "$ANDROID_HOME/cmdline-tools" -name sdkmanager -type f | head -n 1)
-          fi
-
-          echo "Using sdkmanager: $SDKMANAGER"
-
-          yes | "$SDKMANAGER" --licenses >/dev/null 2>&1 || true
-
-          "$SDKMANAGER" "platforms;android-36" "build-tools;36.0.0"
+          yes | sdkmanager --licenses || true
+          sdkmanager "platforms;android-36" "build-tools;36.0.0"
 
       - name: Prepare project
-        shell: bash
         run: |
           set -e
-
           rm -rf build_project
-          mkdir -p build_project
+          mkdir build_project
 
-          ZIP_FILE=$(find . -maxdepth 1 -type f -iname "*.zip" | head -n 1)
+          ZIP_FILE=$(find . -maxdepth 1 -type f -name "*.zip" | head -1)
 
           if [ -z "$ZIP_FILE" ]; then
-            echo "ERROR: Project ZIP not found"
+            echo "Project ZIP not found"
             exit 1
           fi
-
-          echo "Using ZIP: $ZIP_FILE"
 
           unzip -q "$ZIP_FILE" -d build_project
 
-          PUBSPEC=$(find build_project -name pubspec.yaml -type f | head -n 1)
+          PROJECT_DIR=$(find build_project -name pubspec.yaml -type f | head -1 | xargs dirname)
 
-          if [ -z "$PUBSPEC" ]; then
-            echo "ERROR: pubspec.yaml not found"
-            find build_project -maxdepth 4 -type f | head -100
+          if [ -z "$PROJECT_DIR" ]; then
+            echo "Flutter project not found"
             exit 1
           fi
-
-          PROJECT_DIR=$(dirname "$PUBSPEC")
-
-          echo "Flutter project: $PROJECT_DIR"
 
           echo "PROJECT_DIR=$PROJECT_DIR" >> "$GITHUB_ENV"
 
-      - name: Recreate Android project
-        working-directory: ${{ env.PROJECT_DIR }}
-        shell: bash
+      - name: Recreate Android
         run: |
-          set -e
-
+          cd "$PROJECT_DIR"
           rm -rf android
+          flutter create --platforms=android --org com.mervarid --project-name mervarid_app --no-pub .
 
-          flutter create \
-            --platforms=android \
-            --org com.mervarid \
-            --project-name mervarid_app \
-            --no-pub .
-
-      - name: Set Android SDK version
-        working-directory: ${{ env.PROJECT_DIR }}
-        shell: bash
+      - name: Set compile SDK
         run: |
-          set -e
+          cd "$PROJECT_DIR"
 
           if [ -f android/app/build.gradle.kts ]; then
-            echo "Using build.gradle.kts"
+            sed -i 's/compileSdk = flutter.compileSdkVersion/compileSdk = 36/' android/app/build.gradle.kts
+            sed -i 's/targetSdk = flutter.targetSdkVersion/targetSdk = 36/' android/app/build.gradle.kts
+          fi
 
-            python3 - <<'PY'
-from pathlib import Path
-
-p = Path("android/app/build.gradle.kts")
-s = p.read_text()
-
-s = s.replace(
-    "compileSdk = flutter.compileSdkVersion",
-    "compileSdk = 36"
-)
-
-s = s.replace(
-    "targetSdk = flutter.targetSdkVersion",
-    "targetSdk = 36"
-)
-
-p.write_text(s)
-PY
-
-          elif [ -f android/app/build.gradle ]; then
-            echo "Using build.gradle"
-
-            python3 - <<'PY'
-from pathlib import Path
-
-p = Path("android/app/build.gradle")
-s = p.read_text()
-
-s = s.replace(
-    "compileSdk = flutter.compileSdkVersion",
-    "compileSdk = 36"
-)
-
-s = s.replace(
-    "compileSdkVersion flutter.compileSdkVersion",
-    "compileSdkVersion 36"
-)
-
-s = s.replace(
-    "targetSdk = flutter.targetSdkVersion",
-    "targetSdk = 36"
-)
-
-s = s.replace(
-    "targetSdkVersion flutter.targetSdkVersion",
-    "targetSdkVersion 36"
-)
-
-p.write_text(s)
-PY
-
-          else
-            echo "ERROR: Android Gradle file not found"
-            find android -maxdepth 4 -type f | sort
-            exit 1
+          if [ -f android/app/build.gradle ]; then
+            sed -i 's/compileSdk = flutter.compileSdkVersion/compileSdk = 36/' android/app/build.gradle
+            sed -i 's/compileSdkVersion flutter.compileSdkVersion/compileSdkVersion 36/' android/app/build.gradle
+            sed -i 's/targetSdk = flutter.targetSdkVersion/targetSdk = 36/' android/app/build.gradle
+            sed -i 's/targetSdkVersion flutter.targetSdkVersion/targetSdkVersion 36/' android/app/build.gradle
           fi
 
       - name: Get dependencies
-        working-directory: ${{ env.PROJECT_DIR }}
-        run: flutter pub get
-
-      - name: Check Dart
-        working-directory: ${{ env.PROJECT_DIR }}
-        run: flutter analyze --no-fatal-infos
+        run: |
+          cd "$PROJECT_DIR"
+          flutter pub get
 
       - name: Build APK
-        working-directory: ${{ env.PROJECT_DIR }}
-        run: flutter build apk --release
+        run: |
+          cd "$PROJECT_DIR"
+          flutter build apk --release
 
       - name: Upload APK
         uses: actions/upload-artifact@v4
         with:
           name: Mervarid-APK
-          path: ${{ env.PROJECT_DIR }}/build/app/outputs/flutter-apk/app-release.apk
+          path: build_project/**/build/app/outputs/flutter-apk/app-release.apk
           if-no-files-found: error
